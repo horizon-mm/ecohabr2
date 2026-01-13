@@ -1,0 +1,73 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+# ecohabr2
+
+<!-- badges: start -->
+<!-- badges: end -->
+
+The goal of ecohabr2 is to analyze raw data from the Eco-HAB experiments.
+
+Eco-HAB is an automated system for ecologically relevant assessment of social behaviors in mice. For detailed information please see Puścian et. al. (https://doi.org/10.7554/eLife.19532)
+
+## Installation
+
+You can install the development version of ecohabr2 from [GitHub](https://github.com/) with:
+
+``` r
+# install.packages("pak")
+pak::pak("horizon-mm/ecohabr2")
+```
+
+## Example
+
+This is a basic example which shows you how to use this package:
+
+```{r example, eval=FALSE}
+library(ecohabr2)
+# Define the files for mouse ID, experimental time setting and raw data files.
+# Be sure to choose "idfile" or "timefile" first, otherwise choose.dir() may fail in RStudio.
+idfile <- file.choose()
+timefile <- file.choose()
+files <- list.files(choose.dir(), pattern = "0000\\.txt$", full.names = TRUE)
+# Create an EcoHAB object and calculate cage/tube travelling events.
+ehd <- EcoHAB$new(files, idfile, timefile)
+ehd$calc_events()
+# Optional: some RFID reading may be missing and cause abnormal data (extreme long tube events),
+# which can be manually viewed and adjusted. 
+ehd$edit_events()
+# Calculate social events
+ehd$calc_single()
+ehd$calc_pair()
+ehd$calc_follow()
+# Export events list as csv files.
+cohort <- "my_cohort" # Use your own cohort name
+for (name in ehd$all_results())
+  data.table::fwrite(ehd$get_result(name), paste(cohort, name, "csv", sep = "."))
+# For certain time bins, calculate activities in terms of duration and counts,
+# and export results as csv files.
+for (binsize in c(3600, 14400, 43200)) {
+  tag <- paste0(binsize/3600, "hr")
+  ehd$set_binsize(binsize)
+  ehd$calc_activity("events")
+  ehd$calc_activity("single")
+  ehd$calc_activity("pair")
+  ehd$calc_activity("follow")
+  for (name in ehd$all_results()) {
+    if (grepl("time$", name) || grepl("visits$", name))
+      data.table::fwrite(ehd$get_result(name), paste(cohort, name, tag, "csv", sep = "."))
+  }
+}
+```

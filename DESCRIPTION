@@ -1,0 +1,27 @@
+Package: ecohabr2
+Type: Package
+Title: Eco-HAB data analysis
+Version: 2.0.0
+Authors@R: 
+    person(given = "Xiang", 
+           family = "Zhao", 
+           email = "xzhao@cshl.edu", 
+           role = c("aut", "cre"))
+Description: This package is used for process raw datda from EcoHAB system.
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+    R6,
+    data.table,
+    lubridate,
+    ggplot2,
+    DT,
+    shiny
+Suggests:
+    roxygen2,
+    testthat
+Depends:
+    R (>= 4.0.0)
