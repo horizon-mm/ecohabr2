@@ -13,6 +13,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         .timeline_bin = NULL,
                         .events = NULL,
                         results = list(),
+                        timezone = NULL,
                         loc_threshold = NULL,
                         follow_threshold = NULL,
                         n_partial = 0,
@@ -192,8 +193,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             tlb <- copy(private$.timeline_bin)
                             if (is.null(tlb))
                               return(tlb)
-                            tlb[, ':='(start = as.POSIXct(start, origin = "1970-01-01", tz = Sys.timezone()),
-                                       end = as.POSIXct(end, origin = "1970-01-01", tz = Sys.timezone()))]
+                            tlb[, ':='(start = as.POSIXct(start, origin = "1970-01-01", tz = private$timezone),
+                                       end = as.POSIXct(end, origin = "1970-01-01", tz = private$timezone))]
                             tlb[]
                           }
                           else
@@ -201,7 +202,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         }
                       ),
                       public = list(
-                        initialize = function(raw_files = NULL, idfile = NULL, timefile = NULL) {
+                        initialize = function(raw_files = NULL, idfile = NULL,
+                                              timefile = NULL, timezone = Sys.timezone()) {
                           if (is.null(raw_files))
                             stop("Raw files unavailable.")
                           if (is.null(idfile))
@@ -210,7 +212,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             stop("Timeline file unavailable.")
                           
                           # read the raw data text files
-                          raw_data <- rbindlist(lapply(raw_files, fread),
+                          raw_data <- rbindlist(lapply(sort(raw_files), fread),
                                                 use.names = TRUE, fill = TRUE)
                           setnames(raw_data, c("V1", "V2", "V3"),
                                    c("timestamp", "rfid", "id_reader"))
@@ -218,8 +220,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # convert the timestamp into POSIXct time (in second) and millisecond
                           raw_data[, time := as.numeric(fast_strptime(substr(timestamp, 1, 15),
                                                                       format = "%Y%m%d_%H%M%S",
-                                                                      tz = Sys.timezone()))]
+                                                                      tz = timezone))]
                           raw_data[, delay := as.integer(substr(timestamp, 16, 18))]
+                          # TODO: address winter DST ambiguity. R treat it as non-DST
                           private$.raw <- raw_data[order(time, delay)]
                           
                           # read mouse id file and timeline config file
@@ -227,15 +230,15 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$.timeline <- fread(timefile)
                           # fread recognize time string "YYYY-MM-DD HH:MM:SS"as UTC by default
                           # convert it to the system time zone (where the data were acquired)
-                          private$.timeline[, ':='(start = force_tz(start, tzone = Sys.timezone()),
-                                                   end = force_tz(end, tzone = Sys.timezone()))]
+                          private$.timeline[, ':='(start = force_tz(start, tzone = timezone),
+                                                   end = force_tz(end, tzone = timezone))]
                           private$.timeline[]
+                          private$timezone <- timezone
                           
                           # validate the structure of raw data
                           check_required_columns(private$.raw, c("rfid", "id_reader", "time", "delay"))
                           check_required_columns(private$.idlist, c("rfid", "mid", "loc"))
                           check_required_columns(private$.timeline, c("phase", "start", "end"))
-                          # todo: add timezone as a private member to process data from other regions
                         },
                         
                         set_binsize = function(binsize) {

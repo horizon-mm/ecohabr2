@@ -2,7 +2,7 @@
 
 ## 2.0.0 (2026-01-12)
 * Initial github submission.
-* New data structure design and algorithms from ecohabr.Functions are similar but usages are incompatible with ecohabr.
+* New data structure design and algorithms from [ecohabr](https://github.com/horizon-mm/ecohabr).Functions are similar but usages are incompatible with ecohabr.
 * Use data.table to store and process data from Eco-HAB experiments.
 * Use R6 class to organize data and functions.
 
