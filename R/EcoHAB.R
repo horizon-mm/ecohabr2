@@ -1,6 +1,6 @@
 #' @import R6
 #' @import data.table
-#' @importFrom lubridate fast_strptime force_tz
+#' @importFrom lubridate ymd_hms force_tz
 #' @import shiny
 #' @importFrom DT datatable DTOutput renderDT JS dataTableProxy selectRows replaceData
 #' @import ggplot2
@@ -33,13 +33,16 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                           "A", "A", "err", "err", "D", "D", NA, "ad",
                                           "A", "A", "err", "err", "D", "D", "da", NA),
                                         nrow = 8, dimnames = list(1:8, 1:8)),
+                        loc_rev = setNames(c("ab", "ba", "bc", "cb", "cd", "dc", "da", "ad"),
+                                           c("ba", "ab", "cb", "bc", "dc", "cd", "ad", "da")),
+                        
                         divide = function(row_dt, binsize) {
                           # row_dt strictly has only one row
-                          p_start <- as.numeric(row_dt$start)
-                          p_end <- as.numeric(row_dt$end)
+                          p_start <- row_dt$start
+                          p_end <- row_dt$end
                           # get the number of bins from binzize
                           # note that the last bin may be smaller though usually the same
-                          n_bin <- ceiling((p_end - p_start)/binsize)
+                          n_bin <- ceiling(as.numeric(p_end - p_start, "secs")/binsize)
                           res <- data.table(phase = paste(row_dt$phase, "div",
                                                           sprintf(paste0("%0", nchar(n_bin), "d"), seq_len(n_bin)),
                                                           sep = "_"),
@@ -123,7 +126,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         
                         reduce_dt = function(dt) {
                           dt <- copy(dt)
-                          #check_required_columns(dt, c("start", "end"))
+                          check_required_columns(dt, c("start", "end"))
                           setorder(dt, start, end)
                           # [start, end), left-closed and right-open
                           # check if each start is greater than the previous end (e.g. a new group)
@@ -137,8 +140,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         setdiff_dt = function(x, y) {
                           x <- copy(x)
                           y <- copy(y)
-                          #check_required_columns(x, c("start", "end"))
-                          #check_required_columns(y, c("start", "end"))
+                          check_required_columns(x, c("start", "end"))
+                          check_required_columns(y, c("start", "end"))
                           setkey(x, start, end)
                           setkey(y, start, end)
                           xovy <- foverlaps(x, y, type = "any", nomatch = 0L)
@@ -173,43 +176,43 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           if (missing(val))
                             copy(private$.raw)
                           else
-                            stop("Raw data are read-only.")
+                            warning("Raw data are read-only.")
                         },
                         
                         idlist = function(val) {
                           if (missing(val))
                             copy(private$.idlist)
                           else
-                            stop("ID list is read-only.")
+                            warning("ID list is read-only.")
                         },
                         timeline = function(val) {
                           if (missing(val))
                             copy(private$.timeline)
                           else
-                            stop("Timeline is read-only.")
+                            warning("Timeline is read-only.")
                         },
                         timeline_bin = function(val) {
-                          if (missing(val)) {
-                            tlb <- copy(private$.timeline_bin)
-                            if (is.null(tlb))
-                              return(tlb)
-                            tlb[, ':='(start = as.POSIXct(start, origin = "1970-01-01", tz = private$timezone),
-                                       end = as.POSIXct(end, origin = "1970-01-01", tz = private$timezone))]
-                            tlb[]
-                          }
+                          if (missing(val))
+                            copy(private$.timeline_bin)
                           else
-                            stop("Binned timeline is read-only.")
+                            warning("Binned timeline is read-only.")
                         }
                       ),
                       public = list(
                         initialize = function(raw_files = NULL, idfile = NULL,
                                               timefile = NULL, timezone = Sys.timezone()) {
-                          if (is.null(raw_files))
-                            stop("Raw files unavailable.")
-                          if (is.null(idfile))
-                            stop("ID file unavailable.")
-                          if (is.null(timefile))
-                            stop("Timeline file unavailable.")
+                          if (is.null(raw_files)) {
+                            warning("Raw files unavailable.")
+                            return()
+                          }  
+                          if (is.null(idfile)) {
+                            warning("ID file unavailable.")
+                            return()
+                          } 
+                          if (is.null(timefile)) {
+                            warning("Timeline file unavailable.")
+                            return()
+                          }
                           
                           # read the raw data text files
                           raw_data <- rbindlist(lapply(sort(raw_files), fread),
@@ -218,12 +221,11 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                    c("timestamp", "rfid", "id_reader"))
                           raw_data <- unique(raw_data)
                           # convert the timestamp into POSIXct time (in second) and millisecond
-                          raw_data[, time := as.numeric(fast_strptime(substr(timestamp, 1, 15),
-                                                                      format = "%Y%m%d_%H%M%S",
-                                                                      tz = timezone))]
+                          raw_data[, time := as.numeric(ymd_hms(substr(timestamp, 1, 15),
+                                                                tz = timezone))]
                           raw_data[, delay := as.integer(substr(timestamp, 16, 18))]
                           # TODO: address winter DST ambiguity. R treat it as non-DST
-                          private$.raw <- raw_data[order(time, delay)]
+                          private$.raw <- raw_data[order(time, delay, rfid)]
                           
                           # read mouse id file and timeline config file
                           private$.idlist <- fread(idfile)
@@ -242,15 +244,21 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         },
                         
                         set_binsize = function(binsize) {
+                          if (is.null(private$.timeline)) {
+                            warning("Timeline data.table does not exist")
+                            return()
+                          }
                           private$.timeline_bin <- private$.timeline[, private$divide(.SD, binsize), by = .I]
                           private$.timeline_bin[, ':='(I = NULL,
                                                        phase = factor(phase, levels = phase),
                                                        binsize = end - start)]
+                          invisible(self)
                         },
                         
                         calc_events = function(threshold = 2) {
                           if (!is.numeric(threshold)) {
-                            stop("'threshold' must be numeric or integer")
+                            warning("'threshold' must be numeric or integer")
+                            return()
                           }
                           private$loc_threshold <- threshold
                           
@@ -262,7 +270,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$.raw[partial, rfid := private$fix_partial(rfid)]
                           unfixed <- is.na(private$.raw$rfid)
                           private$n_fixed <- private$n_partial - sum(unfixed)
-                          cat(sprintf("%d partial records found, %d records fixed",
+                          cat(sprintf("%d partial records found, %d records fixed\n",
                                       private$n_partial, private$n_fixed))
                           private$.raw <- private$.raw[!unfixed]
                           
@@ -272,13 +280,15 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                           .SDcols = c("id_reader", "time", "delay")]
                           setkeyv(private$.events, private$key_cols)
                           private$results[["events"]] <- copy(private$.events)
+                          invisible(self)
                         },
                         
                         edit_events = function() {
                           events_original <- copy(private$.events)
                           events_edit <- copy(private$results[["events"]])
                           if (is.null(events_original) || is.null(events_edit)) {
-                            stop("Events data.table does not exist")
+                            warning("Events data.table does not exist")
+                            return()
                           }
                           uid <- unique(events_original$rfid)
                           eloc <- c(private$config$tube, "err")
@@ -295,14 +305,19 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                           # leftTable: original data, read-only
                                           # rightTable: editing area
                                           fluidRow(column(6, h4("Original events"),
-                                                          fluidRow(column(6,
+                                                          fluidRow(column(5,
                                                                           selectInput("rfid","Filter by RFID",
                                                                                       choices = c("All" = "", uid))),
-                                                                   column(6,
+                                                                   column(4,
                                                                           numericInput("duration","Minimal duration (s)",
                                                                                        value = 60,
                                                                                        min = 0,
-                                                                                       step = 1))),
+                                                                                       step = 1)),
+                                                                   column(3,
+                                                                          div(style = "display: flex;
+                                                                                       flex-direction: column;",
+                                                                              tags$label("Concurrent events"),
+                                                                              actionButton("showBtn", "Show")))),
                                                           DTOutput("leftTable")),
                                                    column(6, h4("Editing..."),
                                                           actionButton("saveBtn","Save"),
@@ -329,6 +344,25 @@ EcoHAB <- R6::R6Class("EcoHAB",
                               d <- rv$data
                               if (nzchar(input$rfid))
                                 d <- d[rfid == input$rfid]
+                              d
+                            })
+                            # showTable data: filtered by the same time as selected row in leftTable
+                            filteredShow <- reactive({
+                              d <- rv$backup
+                              #time_cols = c("time_start", "time_end")
+                              select_left <- input$leftTable_rows_selected
+                              if (length(select_left) > 0) {
+                                start <- filteredLeft()[select_left, time_start]
+                                end <- filteredLeft()[select_left, time_end]
+                                loc <- filteredLeft()[select_left, location]
+                                d <- d[time_start <= end & time_end >= start]
+                                d <- {
+                                  if (loc == "err")
+                                    d[location %in% private$config$tube]
+                                  else
+                                    d[location == loc | location == private$loc_rev[loc]]
+                                  }
+                              }
                               d
                             })
                             
@@ -364,6 +398,12 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                          "}"
                                                        )))
                             }, server = TRUE)
+                            # showTable output: all concurrent events with selected events in leftTable
+                            output$showTable <- renderDT({
+                              datatable(filteredShow(), editable = FALSE, selection = "none",
+                                        options = list(dom = 'ltip', ordering = FALSE,
+                                                       scrollX = TRUE, autoWidth = TRUE))
+                            })
                             # monitor single row selection on leftTable and turn rightTable to page of the same raw
                             observeEvent(input$leftTable_rows_selected, {
                               req(input$rightTable_dt_ready)
@@ -386,6 +426,16 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                 return()
                               session$sendCustomMessage("gotoPage", page_num)
                               selectRows(proxy, select_right[1])
+                            })
+                            # show concurrent events at selected
+                            observeEvent(input$showBtn, {
+                              select_left <- input$leftTable_rows_selected
+                              if(length(select_left) == 0)
+                                return()
+                              showModal(modalDialog(title = "Concurrent events",
+                                                    DTOutput("showTable"),
+                                                    easyClose = TRUE,
+                                                    size = "l"))
                             })
                             # process data editing in rightTable
                             observeEvent(input$rightTable_cell_edit, {
@@ -432,7 +482,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         
                         calc_single = function(loc = c("cages", "all")) {
                           if (is.null(private$results[["events"]])) {
-                            stop("Events data.table does not exist")
+                            warning("Events data.table does not exist")
+                            return()
                           }
                           # argument loc must be "cages" (by default) or "all"
                           loc <- switch(match.arg(loc, c("cages", "all")),
@@ -464,17 +515,19 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                            time_end = offset + end %/% 1000,
                                            delay_end = end %% 1000,
                                            duration_ms = end - start)]
-                          single_dt <- single_dt[duration_ms > 0][order(start, end)]
+                          single_dt <- single_dt[duration_ms > 0][order(start, end, rfid)]
                           single_dt[, c("start", "end") := NULL]
                           setcolorder(single_dt, c("rfid", "time_start",
                                                    "delay_start", "time_end", "delay_end",
                                                    "duration_ms", "location"))
                           private$results[["single"]] <- single_dt
+                          invisible(self)
                         },
                         
                         calc_pair = function(loc = c("cages", "all")) {
                           if (is.null(private$results[["events"]])) {
-                            stop("Events data.table does not exist")
+                            warning("Events data.table does not exist")
+                            return()
                           }
                           # argument loc must be "cages" (by default) or "all"
                           loc <- switch(match.arg(loc, c("cages", "all")),
@@ -513,20 +566,22 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                           time_end = offset + end %/% 1000,
                                           delay_end = end %% 1000,
                                           duration_ms = end - start)]
-                          pair_dt <- pair_dt[duration_ms > 0][order(start, end)]
+                          pair_dt <- pair_dt[duration_ms > 0][order(start, end, rfid)]
                           pair_dt[, c("start", "end") := NULL]
                           setcolorder(pair_dt, c("rfid1", "rfid2", "rfid",
                                                  "time_start", "delay_start",
                                                  "time_end", "delay_end",
                                                  "duration_ms", "location"))
                           private$results[["pair"]] <- pair_dt
+                          invisible(self)
                         },
                         
                         calc_follow = function(loc = c("tubes", "all"),
                                                mode = c("in_place", "delayed"),
                                                threshold = 2) {
                           if (is.null(private$results[["events"]])) {
-                            stop("Events data.table does not exist")
+                            warning("Events data.table does not exist")
+                            return()
                           }
                           # argument "loc" must be either "tubes" (by default) or "all"
                           loc <- switch(match.arg(loc, c("tubes", "all")),
@@ -539,7 +594,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           mode <- match.arg(mode, c("in_place", "delayed"))
                           
                           if (!is.numeric(threshold)) {
-                            stop("'threshold' must be numeric or integer")
+                            warning("'threshold' must be numeric or integer")
+                            return()
                           }
                           private$follow_threshold <- threshold
                           
@@ -576,25 +632,28 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                         delay_end = i.delay_start,
                                                         start,
                                                         end = i.start)]
-                          # to do: check if the followee stays at the reader after passing the tube
+                          # TODO: check if the followee stays at the reader after passing the tube
+                          # TODO: check if the follower exit the tube later than the followee
                           
                           # Step 3. Clean up the results
                           # rfid1 (before "|") as the followee; rfid2 (after "|") as the follower
                           # duration_ms is the delay of entries in each followee-follower pair
                           follow_dt[, ':='(rfid = paste(rfid1, rfid2, sep = "|"),
                                            duration_ms = end - start)]
-                          follow_dt <- follow_dt[duration_ms > 0][order(start, end)]
+                          follow_dt <- follow_dt[duration_ms > 0][order(start, end, rfid)]
                           follow_dt[, c("start", "end") := NULL]
                           setcolorder(follow_dt, c("rfid1", "rfid2", "rfid", "time_start",
                                                    "delay_start", "time_end", "delay_end",
                                                    "duration_ms", "location"))
                           private$results[["follow"]] <- follow_dt
+                          invisible(self)
                         },
                         
                         calc_activity = function(name = c("events", "single", "pair", "follow")) {
                           name <- match.arg(name, c("events", "single", "pair", "follow"))
                           if (is.null(private$.timeline_bin)) {
-                            stop("'timeline_bin' is missing")
+                            warning("'timeline_bin' is missing")
+                            return()
                           }
                           activity_dt <- self$get_result(name)
                           
@@ -602,13 +661,14 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # some "pair" or "follow" id pairs may be missing at a location or phase
                           # phase and rfid are extracted from metadata md
                           # location is extracted from the events data.table
-                          offset <- min(private$.timeline_bin$start)
-                          bin_breaks <- (c(private$.timeline_bin$start,
-                                           private$.timeline_bin$end[nrow(private$.timeline_bin)]) -
-                                           offset)*1000
+                          offset <- as.numeric(min(private$.timeline_bin$start))
+                          bin_breaks <- c(private$.timeline_bin$start,
+                                          private$.timeline_bin$end[nrow(private$.timeline_bin)])
+                          bin_breaks <- (as.numeric(bin_breaks) - offset) *1000
                           bin_labels <- private$.timeline_bin$phase
                           bin_size <- setNames(private$.timeline_bin$binsize,
                                                private$.timeline_bin$phase)
+                          bin_size <- as.numeric(bin_size, "secs")
                           all_rfid <- private$.idlist$rfid
                           rfid_pair <- CJ(rfid1 = all_rfid, rfid2 = all_rfid)
                           rfid_pair <- rfid_pair[rfid1 != rfid2]
@@ -677,6 +737,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                  .(phase, rfid, location, duration_ms, ratio = ratio - i.adjust)]
                           }
                           private$results[[paste(name, "time", sep = "_")]] <- time_res
+                          invisible(self)
                         },
                         
                         all_results = function() {
@@ -684,13 +745,20 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         },
                         
                         get_result = function(result_name) {
-                          if (!result_name %in% names(private$results))
-                            stop(sprintf("Result '%s' not found", result_name))
+                          if (!result_name %in% names(private$results)) {
+                            warning(sprintf("Result '%s' not found", result_name))
+                            return()
+                          } 
                           copy(private$results[[result_name]])
                         },
                         
                         plot_occupancy = function() {
-                          dt <- self$get_result("events_time")[location %in% c("A", "B", "C", "D")]
+                          dt <- self$get_result("events_time")
+                          if (is.null(dt)) {
+                            warning("Events_time not available, Will not plot")
+                            return()
+                          }
+                          dt <- dt[location %in% c("A", "B", "C", "D")]
                           map_mid <- setNames(private$.idlist$mid, private$.idlist$rfid)
                           dt[, mid := map_mid[rfid]]
                           # TODO: global mid
