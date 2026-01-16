@@ -22,6 +22,9 @@ The goal of ecohabr2 is to analyze raw data from the Eco-HAB experiments.
 
 Eco-HAB is an automated system for ecologically relevant assessment of social behaviors in mice. For detailed information please see Puścian et. al. (https://doi.org/10.7554/eLife.19532)
 
+ecohabr2 is an independent R implementation of analytic methods in the above and other publications using Eco-HAB. Care is taken to reproduce the analysis. However, due to possible difference in raw data cleansing, algorithms and computational precision, the results may not be exactly
+the same as the original methods.
+
 ## Installation
 
 You can install the development version of ecohabr2 from [GitHub](https://github.com/) with:

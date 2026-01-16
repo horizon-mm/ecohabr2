@@ -1,6 +1,6 @@
 #' @import R6
 #' @import data.table
-#' @importFrom lubridate fast_strptime force_tz
+#' @importFrom lubridate ymd_hms force_tz
 #' @import shiny
 #' @importFrom DT datatable DTOutput renderDT JS dataTableProxy selectRows replaceData
 #' @import ggplot2
@@ -35,11 +35,11 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                         nrow = 8, dimnames = list(1:8, 1:8)),
                         divide = function(row_dt, binsize) {
                           # row_dt strictly has only one row
-                          p_start <- as.numeric(row_dt$start)
-                          p_end <- as.numeric(row_dt$end)
+                          p_start <- row_dt$start
+                          p_end <- row_dt$end
                           # get the number of bins from binzize
                           # note that the last bin may be smaller though usually the same
-                          n_bin <- ceiling((p_end - p_start)/binsize)
+                          n_bin <- ceiling(as.numeric(p_end - p_start, "secs")/binsize)
                           res <- data.table(phase = paste(row_dt$phase, "div",
                                                           sprintf(paste0("%0", nchar(n_bin), "d"), seq_len(n_bin)),
                                                           sep = "_"),
@@ -189,14 +189,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             stop("Timeline is read-only.")
                         },
                         timeline_bin = function(val) {
-                          if (missing(val)) {
-                            tlb <- copy(private$.timeline_bin)
-                            if (is.null(tlb))
-                              return(tlb)
-                            tlb[, ':='(start = as.POSIXct(start, origin = "1970-01-01", tz = private$timezone),
-                                       end = as.POSIXct(end, origin = "1970-01-01", tz = private$timezone))]
-                            tlb[]
-                          }
+                          if (missing(val))
+                            copy(private$.timeline_bin)
                           else
                             stop("Binned timeline is read-only.")
                         }
@@ -218,12 +212,11 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                    c("timestamp", "rfid", "id_reader"))
                           raw_data <- unique(raw_data)
                           # convert the timestamp into POSIXct time (in second) and millisecond
-                          raw_data[, time := as.numeric(fast_strptime(substr(timestamp, 1, 15),
-                                                                      format = "%Y%m%d_%H%M%S",
-                                                                      tz = timezone))]
+                          raw_data[, time := as.numeric(ymd_hms(substr(timestamp, 1, 15),
+                                                                tz = timezone))]
                           raw_data[, delay := as.integer(substr(timestamp, 16, 18))]
                           # TODO: address winter DST ambiguity. R treat it as non-DST
-                          private$.raw <- raw_data[order(time, delay)]
+                          private$.raw <- raw_data[order(time, delay, rfid)]
                           
                           # read mouse id file and timeline config file
                           private$.idlist <- fread(idfile)
@@ -262,7 +255,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$.raw[partial, rfid := private$fix_partial(rfid)]
                           unfixed <- is.na(private$.raw$rfid)
                           private$n_fixed <- private$n_partial - sum(unfixed)
-                          cat(sprintf("%d partial records found, %d records fixed",
+                          cat(sprintf("%d partial records found, %d records fixed\n",
                                       private$n_partial, private$n_fixed))
                           private$.raw <- private$.raw[!unfixed]
                           
@@ -464,7 +457,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                            time_end = offset + end %/% 1000,
                                            delay_end = end %% 1000,
                                            duration_ms = end - start)]
-                          single_dt <- single_dt[duration_ms > 0][order(start, end)]
+                          single_dt <- single_dt[duration_ms > 0][order(start, end, rfid)]
                           single_dt[, c("start", "end") := NULL]
                           setcolorder(single_dt, c("rfid", "time_start",
                                                    "delay_start", "time_end", "delay_end",
@@ -513,7 +506,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                           time_end = offset + end %/% 1000,
                                           delay_end = end %% 1000,
                                           duration_ms = end - start)]
-                          pair_dt <- pair_dt[duration_ms > 0][order(start, end)]
+                          pair_dt <- pair_dt[duration_ms > 0][order(start, end, rfid)]
                           pair_dt[, c("start", "end") := NULL]
                           setcolorder(pair_dt, c("rfid1", "rfid2", "rfid",
                                                  "time_start", "delay_start",
@@ -583,7 +576,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # duration_ms is the delay of entries in each followee-follower pair
                           follow_dt[, ':='(rfid = paste(rfid1, rfid2, sep = "|"),
                                            duration_ms = end - start)]
-                          follow_dt <- follow_dt[duration_ms > 0][order(start, end)]
+                          follow_dt <- follow_dt[duration_ms > 0][order(start, end, rfid)]
                           follow_dt[, c("start", "end") := NULL]
                           setcolorder(follow_dt, c("rfid1", "rfid2", "rfid", "time_start",
                                                    "delay_start", "time_end", "delay_end",
@@ -602,13 +595,14 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # some "pair" or "follow" id pairs may be missing at a location or phase
                           # phase and rfid are extracted from metadata md
                           # location is extracted from the events data.table
-                          offset <- min(private$.timeline_bin$start)
-                          bin_breaks <- (c(private$.timeline_bin$start,
-                                           private$.timeline_bin$end[nrow(private$.timeline_bin)]) -
-                                           offset)*1000
+                          offset <- as.numeric(min(private$.timeline_bin$start))
+                          bin_breaks <- c(private$.timeline_bin$start,
+                                          private$.timeline_bin$end[nrow(private$.timeline_bin)])
+                          bin_breaks <- (as.numeric(bin_breaks) - offset) *1000
                           bin_labels <- private$.timeline_bin$phase
                           bin_size <- setNames(private$.timeline_bin$binsize,
                                                private$.timeline_bin$phase)
+                          bin_size <- as.numeric(bin_size, "secs")
                           all_rfid <- private$.idlist$rfid
                           rfid_pair <- CJ(rfid1 = all_rfid, rfid2 = all_rfid)
                           rfid_pair <- rfid_pair[rfid1 != rfid2]
