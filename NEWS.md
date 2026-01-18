@@ -1,4 +1,4 @@
-# ecohabr2 2.0.0
+# ecohabr2 2.0.1
 
 ## 2.0.1 (2026-01-17)
 * Use lubridate::ymd_hms() instead of lubridate::fast_strptime() to read timestamp. The former is more efficient.
