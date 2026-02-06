@@ -1,7 +1,7 @@
 Package: ecohabr2
 Type: Package
 Title: Eco-HAB data analysis
-Version: 2.0.1
+Version: 2.1.0
 Authors@R: 
     person(given = "Xiang", 
            family = "Zhao", 
@@ -21,7 +21,10 @@ Imports:
     DT,
     shiny
 Suggests:
+    knitr,
+    rmarkdown,
     roxygen2,
     testthat
 Depends:
     R (>= 4.0.0)
+VignetteBuilder: knitr

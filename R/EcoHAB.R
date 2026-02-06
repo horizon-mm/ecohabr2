@@ -215,11 +215,13 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           }
                           
                           # read the raw data text files
-                          raw_data <- rbindlist(lapply(sort(raw_files), fread),
+                          raw_data <- rbindlist(lapply(sort(raw_files), fread,
+                                                       colClasses = "character"),
                                                 use.names = TRUE, fill = TRUE)
                           setnames(raw_data, c("V1", "V2", "V3"),
                                    c("timestamp", "rfid", "id_reader"))
                           raw_data <- unique(raw_data)
+                          raw_data[, id_reader := as.integer(id_reader)]
                           # convert the timestamp into POSIXct time (in second) and millisecond
                           raw_data[, time := as.numeric(ymd_hms(substr(timestamp, 1, 15),
                                                                 tz = timezone))]
@@ -228,7 +230,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$.raw <- raw_data[order(time, delay, rfid)]
                           
                           # read mouse id file and timeline config file
-                          private$.idlist <- fread(idfile)
+                          private$.idlist <- fread(idfile, colClasses = "character")
                           private$.timeline <- fread(timefile)
                           # fread recognize time string "YYYY-MM-DD HH:MM:SS"as UTC by default
                           # convert it to the system time zone (where the data were acquired)
@@ -241,6 +243,70 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           check_required_columns(private$.raw, c("rfid", "id_reader", "time", "delay"))
                           check_required_columns(private$.idlist, c("rfid", "mid", "loc"))
                           check_required_columns(private$.timeline, c("phase", "start", "end"))
+                        },
+                        
+                        dummy = function(n_subject = 10, p_step = 0.5,
+                                         mean_step = 1000, sd_step = 100,
+                                         t = 86400, p_cage = 0.99, alpha_cage = 10,
+                                         alpha_tube = 2, theta = 1, timezone = "UTC") {
+                          # initiate subjects and activities
+                          subject <- paste0("AE",
+                                            sprintf(paste0("%0", nchar(n_subject), "d"),
+                                                          1:n_subject),
+                                            "000000")
+                          n_step <- round(rnorm(n_subject, mean_step, sd_step))
+                          
+                          # make raw recordings
+                          raw <- list()
+                          for (i in seq_len(n_subject)) {
+                            step <- ifelse(runif(n_step[i]) < p_step, 1, -1)
+                            position <- cumsum(step) %% 8 + 1
+                            from <- c(1, position[-n_step[i]])
+                            to <- position
+                            loc <- private$locmap[cbind(from, to)]
+                            duration <- numeric(n_step[i])
+                            
+                            in_cage <- loc %in% unique(private$config$cage)
+                            n_cage <- sum(in_cage)
+                            
+                            g_cage <- rgamma(n_cage, shape = alpha_cage, scale = theta)
+                            duration[in_cage] <- t * p_cage * g_cage / sum(g_cage)
+                            g_tube <- rgamma(n_step[i] - n_cage, shape = alpha_tube, scale = theta)
+                            duration[!in_cage] <- t * (1 - p_cage) * g_tube / sum(g_tube)
+                            
+                            raw[[i]] <- data.table(timestamp = cumsum(duration),
+                                                   rfid = subject[i],
+                                                   id_reader = as.integer(position))
+                          }
+                          raw <- rbindlist(raw, use.names = TRUE, fill = TRUE)
+                          raw <- raw[order(timestamp, rfid)]
+                          raw[, time := floor(timestamp)]
+                          raw[, delay := as.integer(1000*(timestamp - time))]
+                          raw[, timestamp := as.POSIXct(timestamp, tz = timezone)]
+                          raw[, timestamp := format(timestamp, "%Y%m%d_%H%M%OS3")]
+                          raw[, timestamp := gsub("\\.", "", timestamp)]
+                          setcolorder(raw, c("timestamp", "rfid", "id_reader", "time", "delay"))
+                          private$.raw <- raw[]
+                          
+                          # make idlist
+                          private$.idlist <- data.table(rfid = subject,
+                                                        mid = substr(subject, 1, 4),
+                                                        loc = "A")
+                          
+                          # make timeline
+                          private$.timeline <- data.table(phase = "dummy_phase",
+                                                          start = as.POSIXct("1970-01-01 00:00:00",
+                                                                             tz = timezone),
+                                                          end = as.POSIXct("1970-01-02 00:00:00",
+                                                                           tz = timezone))
+                          private$timezone <- timezone
+                          
+                          # validate the structure of raw data
+                          check_required_columns(private$.raw, c("rfid", "id_reader", "time", "delay"))
+                          check_required_columns(private$.idlist, c("rfid", "mid", "loc"))
+                          check_required_columns(private$.timeline, c("phase", "start", "end"))
+                          
+                          invisible(self)
                         },
                         
                         set_binsize = function(binsize) {

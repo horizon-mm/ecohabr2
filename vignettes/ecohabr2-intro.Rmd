@@ -1,0 +1,148 @@
+---
+title: "ecohabr2-intro"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ecohabr2-intro}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(ecohabr2)
+```
+
+# ecohabr2
+
+The goal of ecohabr2 is to analyze raw data from the Eco-HAB experiments.
+
+Eco-HAB is an automated system for ecologically relevant assessment of social behaviors in mice. For detailed information please see Puścian et. al. (https://doi.org/10.7554/eLife.19532)
+
+ecohabr2 is an independent R implementation of analytic methods in the above and other publications using Eco-HAB. Care is taken to reproduce the analysis. However, due to possible difference in raw data cleansing, algorithms and computational precision, the results may not be exactly
+the same as the original methods.
+
+## Data files
+
+### Raw recording data
+Raw data are stored in text files named as "RAW_COMx_YYYYMMDD_hh0000.txt", where "x" is the ID of COM port that Eco-HAB is connected to, "YYYYMMDD" is the local date of recording and "hh" is the local time in hours. Eco-HAB generates one text file per hour. There are multiple lines in each raw text file, and each line contains three elements: time stamp ("YYYYMMDD_hhmmsszzz", where zzz is milliseconds), RFID (ten-digit hexadecimal numbers) and reader ID (01~08).
+
+```text
+20250701_060001000	00000001AE	01
+20250701_060002000	00000002AE	01
+20250701_060003000	00000003AE	01
+20250701_060004000	00000004AE	01
+```
+
+### ID list
+ID list file is a text file containing N+1 lines, where N is the number of animals in Eco-HAB. The first line is a header with "rfid", "mid" and "loc", where "rfid" denotes the above ten-digit hexadecimal numbers, "mid" is user-defined animal unique ID and "loc" is the initial place of the animal (usually cage "A" or "C"). Each following line describes one animal.
+
+```text
+rfid	mid	loc
+00000001AE	x01	A
+00000002AE	x02	A
+00000003AE	x03	A
+00000004AE	x04 A
+```
+
+### Timeline
+Timeline file is a text fie containing M+1 lines, where M is the number of dark/light phases (usually 2 x length of experiment in days). The first line is a header with "phase", "start" and "end", where "phase" is either "day?_dark" or "day?_light", and "start" and "end" are the local time when light is turned off or on, formatted in "YYYY-MM-DD hh:mm:ss".
+
+```text
+phase	start	end
+test	2025-7-1 6:00:00	2025-7-1 7:00:00
+```
+
+Note that there is no header in the raw recording files
+
+Here are some sample data sets provided with this package.
+
+## Sample data 1
+
+Let's imagine a 1-hour Eco-HAB experiment in which 4 mice go through cages A, B, C and D following each other. Mice enter and exit tubes on whole seconds (aka milliseconds in the time stamp is always 000).
+
+```{r}
+data_dir <- system.file("extdata", "dataset_a", package = "ecohabr2")
+idfile <- file.path(data_dir, "sample_a_idlist.txt")
+timefile <- file.path(data_dir, "sample_a_timeline.txt")
+files <- list.files(data_dir, pattern = "0000\\.txt$", full.names = TRUE)
+ehd <- EcoHAB$new(files, idfile, timefile)
+```
+
+Now we have created an EcoHAB object to keep and process an Eco-HAB experiment and can check out the raw data in it. Note that these data are designed to be read-only.
+
+```{r}
+ehd$raw
+ehd$idlist
+ehd$timeline
+```
+
+To calculate events from all individuals, run the following codes. Since this is a simple dataset, we don't have to perform manual adjustment of event locations.
+
+```{r}
+# Calculate personal events
+ehd$calc_events()
+# Calculate social events
+ehd$calc_single()
+ehd$calc_pair()
+ehd$calc_follow()
+```
+
+We can summarize the event counts and duration in smaller time bins. Here we use 10 minutes as the bin size.
+
+```{r}
+tag <- "10min"
+ehd$set_binsize(600)
+ehd$calc_activity("events")
+ehd$calc_activity("single")
+ehd$calc_activity("pair")
+ehd$calc_activity("follow")
+```
+
+To view which results are saved, run the following codes at any stage.
+
+```{r}
+ehd$all_results()
+```
+
+To view a specific result (here "events" as an example), run the following codes.
+
+```{r}
+ehd$get_result("events")
+```
+
+To export all results to `.csv` file, run the following codes.
+
+```{r, eval = FALSE}
+cohort <- "sample_a"
+for (name in ehd$all_results())
+  data.table::fwrite(ehd$get_result(name), paste(cohort, name, "csv", sep = "."))
+```
+
+To retrieve events, counts and duration summary data, run the following code. The data are in the form of `data.table`. For downstream analysis, `data.table` package has to be attached first.
+
+```{r, eval = FALSE}
+# Please replace variable 'name' with the actual result.
+dt <- ehd$get_result(name)
+```
+
+## Sample data 2
+Now we are going to generate a dummy data set, which is build by simulating the activity of 10 mouse over 24 hours.
+
+```{r}
+ehd <- EcoHAB$new()
+ehd$dummy()
+```
+
+Now we have created an EcoHAB object with dummy data just for the purpose of this vignette. We can check out the raw data in it. Note that these data are designed to be read-only.
+
+```{r}
+head(ehd$raw)
+ehd$idlist
+ehd$timeline
+```
