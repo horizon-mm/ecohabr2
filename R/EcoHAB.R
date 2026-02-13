@@ -1,3 +1,11 @@
+#' R6 class processing Eco-HAB experimental data
+#' 
+#' @description
+#' This class stores raw data and convert them into events and summaries.
+#' 
+#' @details
+#' Additional details...
+#' 
 #' @import R6
 #' @import data.table
 #' @importFrom lubridate ymd_hms force_tz
@@ -172,25 +180,28 @@ EcoHAB <- R6::R6Class("EcoHAB",
                       ),
                       
                       active = list(
+                        #' @field raw Processed raw data in a data.table (read-only)
                         raw = function(val) {
                           if (missing(val))
                             copy(private$.raw)
                           else
                             warning("Raw data are read-only.")
                         },
-                        
+                        #' @field idlist Animal ID information in a data.table (read-only)
                         idlist = function(val) {
                           if (missing(val))
                             copy(private$.idlist)
                           else
                             warning("ID list is read-only.")
                         },
+                        #' @field timeline Experimental time line setting in a data.table (read-only)
                         timeline = function(val) {
                           if (missing(val))
                             copy(private$.timeline)
                           else
                             warning("Timeline is read-only.")
                         },
+                        #' @field timeline_bin Subdivided time line setting in a data.table (read-only)
                         timeline_bin = function(val) {
                           if (missing(val))
                             copy(private$.timeline_bin)
@@ -199,6 +210,12 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         }
                       ),
                       public = list(
+                        #' @description
+                        #' Create a new Eco-HAB data set from input files
+                        #' @param raw_files A list of RFID recording text files
+                        #' @param idfile A text file containing animal ID information
+                        #' @param timefile A text file containing experimental time line information
+                        #' @param timezone The time zone of RFID recording 
                         initialize = function(raw_files = NULL, idfile = NULL,
                                               timefile = NULL, timezone = Sys.timezone()) {
                           if (is.null(raw_files)) {
@@ -261,7 +278,20 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           check_required_columns(private$.idlist, c("rfid", "mid", "loc"))
                           check_required_columns(private$.timeline, c("phase", "start", "end"))
                         },
-                        
+                        #' @description
+                        #' Create a dummy Eco-HAB data set from pre-set parameters
+                        #' @param n_subject Number of animals
+                        #' @param p_step Probability of animal moving forwards on the RFID reader chain
+                        #' @param mean_step Mean value of total movements
+                        #' @param sd_step Standard deviation of movements
+                        #' @param t Total recording time
+                        #' @param p_cage Probability of time stayed in cages
+                        #' @param alpha_cage Alpha of individual cage event time distribution (gamma)
+                        #' @param alpha_tube Alpha of individual tube event time distribution (gamma)
+                        #' @param theta Theta of individual cage or tube event time distribution (gamma)
+                        #' @param timezone The time zone of dummy RFID recording
+                        #' @param seed Random seed to generate dummy data
+                        #' @return The current EcoHAB object
                         dummy = function(n_subject = 10, p_step = 0.5, mean_step = 1000,
                                          sd_step = 100, t = 86400, p_cage = 0.99, alpha_cage = 10,
                                          alpha_tube = 2, theta = 1, timezone = "UTC", seed = 123) {
@@ -331,7 +361,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Divide the experimental time line according to bin size
+                        #' @param binsize The duration of each bin in seconds
+                        #' @return The current EcoHAB object
                         set_binsize = function(binsize) {
                           if (is.null(private$.timeline)) {
                             warning("Timeline data.table does not exist")
@@ -343,7 +376,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                        binsize = end - start)]
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Populate events from RFID recordings
+                        #' @param threshold The maximal time the animal stays at a RFID reader in seconds
+                        #' @return The current EcoHAB object
                         calc_events = function(threshold = 2) {
                           if (!is.numeric(threshold)) {
                             warning("'threshold' must be numeric or integer")
@@ -371,7 +407,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$results[["events"]] <- copy(private$.events)
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Show and edit events in a ShinyApp
                         edit_events = function() {
                           events_original <- copy(private$.events)
                           events_edit <- copy(private$results[["events"]])
@@ -568,7 +605,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           if(!is.null(res))
                             private$results[["events"]] <- res
                         },
-                        
+                        #' @description
+                        #' Populate the single events from individual events
+                        #' @param loc The locations where single events are counted
+                        #' @return The current EcoHAB object
                         calc_single = function(loc = c("cages", "all")) {
                           if (is.null(private$results[["events"]])) {
                             warning("Events data.table does not exist")
@@ -612,7 +652,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$results[["single"]] <- single_dt
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Populate the pair-wise events from individual events
+                        #' @param loc The locations where pair-wise events are counted
+                        #' @return The current EcoHAB object
                         calc_pair = function(loc = c("cages", "all")) {
                           if (is.null(private$results[["events"]])) {
                             warning("Events data.table does not exist")
@@ -664,7 +707,12 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$results[["pair"]] <- pair_dt
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Populate the following events from individual events
+                        #' @param loc The locations where following events are counted
+                        #' @param mode The mode of following events identification
+                        #' @param threshold The maximal interval bwtween two animals in the "delayed" mode
+                        #' @return The current EcoHAB object
                         calc_follow = function(loc = c("tubes", "all"),
                                                mode = c("in_place", "delayed"),
                                                threshold = 2) {
@@ -737,7 +785,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$results[["follow"]] <- follow_dt
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Calculate the counts and duration of given events in each time bin
+                        #' @param name The name of events data.table in the "results" list
+                        #' @return The current EcoHAB object
                         calc_activity = function(name = c("events", "single", "pair", "follow")) {
                           name <- match.arg(name, c("events", "single", "pair", "follow"))
                           if (is.null(private$.timeline_bin)) {
@@ -828,11 +879,16 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$results[[paste(name, "time", sep = "_")]] <- time_res
                           invisible(self)
                         },
-                        
+                        #' @description
+                        #' Get the names of all results
+                        #' @return A vector containing names of all elements in the "results" list
                         all_results = function() {
                           names(private$results)
                         },
-                        
+                        #' @description
+                        #' Get a result in data.table
+                        #' @param result_name The name of events or analyses data.table in the "results" list
+                        #' @return A copy of data.table in the "results" list
                         get_result = function(result_name) {
                           if (!result_name %in% names(private$results)) {
                             warning(sprintf("Result '%s' not found", result_name))
@@ -840,7 +896,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           } 
                           copy(private$results[[result_name]])
                         },
-                        
+                        #' @description
+                        #' Delete all analysis results
+                        #' @param prompt Instructions shown in the console
+                        #' @return TRUE if results are deleted or FALSE otherwise
                         reset_results = function(prompt = "Delete all results?: (y/n): ") {
                           while (TRUE) {
                             answer <- readline(prompt)
@@ -858,7 +917,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             }
                           }
                         },
-                        
+                        #' @description
+                        #' Plot the cage occupancy in heatmap
+                        #' @return A "ggplot2" object containing the plot
                         plot_occupancy = function() {
                           dt <- self$get_result("events_time")
                           if (is.null(dt)) {
