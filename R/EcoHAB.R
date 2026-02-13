@@ -222,17 +222,34 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                    c("timestamp", "rfid", "id_reader"))
                           raw_data <- unique(raw_data)
                           raw_data[, id_reader := as.integer(id_reader)]
-                          # convert the timestamp into POSIXct time (in second) and millisecond
-                          raw_data[, time := as.numeric(ymd_hms(substr(timestamp, 1, 15),
-                                                                tz = timezone))]
+                          # convert the time stamps into POSIXct time (in second) and millisecond
+                          raw_data[, time := ymd_hms(substr(timestamp, 1, 15))]
+                          # ymd_hms converts time stamps "YYYYMMDD_HHMMSS" as UTC by default
                           raw_data[, delay := as.integer(substr(timestamp, 16, 18))]
-                          # TODO: address winter DST ambiguity. R treat it as non-DST
+                          
+                          time_pre <- force_tz(raw_data[, time], tzone = timezone, roll_dst = "pre")
+                          time_post <- force_tz(raw_data[, time], tzone = timezone, roll_dst = "post")
+                          
+                          # default time zone is DST (which happens earlier)
+                          raw_data[, time := time_pre]
+                          # eliminate ambiguity when there is more than 1 ambiguous time stamp
+                          t_ambiguous <- time_pre != time_post
+                          n_ambiguous <- sum(t_ambiguous)
+                          if (n_ambiguous > 1) {
+                            t_delta <- diff(as.numeric(time_pre) +
+                                              raw_data[t_ambiguous, delay] / 1000)
+                            n_switch <- which(t_delta < 0)
+                            raw_data[t_ambiguous, time := c(time_pre[t_ambiguous][seq_len(n_switch)],
+                                                            time_post[t_ambiguous][(n_switch+1) : n_ambiguous])]
+                          }
+                          raw_data[, time := as.numeric(time)]
+                          
                           private$.raw <- raw_data[order(time, delay, rfid)]
                           
                           # read mouse id file and timeline config file
                           private$.idlist <- fread(idfile, colClasses = "character")
                           private$.timeline <- fread(timefile)
-                          # fread recognize time string "YYYY-MM-DD HH:MM:SS"as UTC by default
+                          # fread recognize times tamps "YYYY-MM-DD HH:MM:SS" as UTC by default
                           # convert it to the system time zone (where the data were acquired)
                           private$.timeline[, ':='(start = force_tz(start, tzone = timezone),
                                                    end = force_tz(end, tzone = timezone))]
@@ -245,11 +262,17 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           check_required_columns(private$.timeline, c("phase", "start", "end"))
                         },
                         
-                        dummy = function(n_subject = 10, p_step = 0.5,
-                                         mean_step = 1000, sd_step = 100,
-                                         t = 86400, p_cage = 0.99, alpha_cage = 10,
-                                         alpha_tube = 2, theta = 1, timezone = "UTC") {
+                        dummy = function(n_subject = 10, p_step = 0.5, mean_step = 1000,
+                                         sd_step = 100, t = 86400, p_cage = 0.99, alpha_cage = 10,
+                                         alpha_tube = 2, theta = 1, timezone = "UTC", seed = 123) {
+                          if (exists(".Random.seed", envir = .GlobalEnv)) {
+                            old_seed <- .GlobalEnv$.Random.seed
+                            on.exit(assign(".Random.seed", old_seed, envir = .GlobalEnv))
+                          } else {
+                            on.exit(rm(".Random,seed", envir = .GlobalEnv))
+                          }
                           # initiate subjects and activities
+                          set.seed(seed)
                           subject <- paste0("AE",
                                             sprintf(paste0("%0", nchar(n_subject), "d"),
                                                           1:n_subject),
@@ -816,6 +839,24 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             return()
                           } 
                           copy(private$results[[result_name]])
+                        },
+                        
+                        reset_results = function(prompt = "Delete all results?: (y/n): ") {
+                          while (TRUE) {
+                            answer <- readline(prompt)
+                            answer <- tolower(trimws(answer))
+                            if (answer == "y") {
+                              private$.timeline_bin <- NULL
+                              private$results <- NULL
+                              cat("All results have been deleted.\n")
+                              return(invisible(TRUE))
+                            } else if (answer == "n") {
+                              cat("Operation cancelled.\n")
+                              return(invisible(FALSE))
+                            } else {
+                              cat("Invalid input. Please press 'y' or 'n'.\n")
+                            }
+                          }
                         },
                         
                         plot_occupancy = function() {
