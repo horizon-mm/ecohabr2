@@ -132,6 +132,7 @@ dt <- ehd$get_result(name)
 ```
 
 ## Sample data 2
+
 Now we are going to generate a dummy data set, which is build by simulating the activity of 10 mouse over 24 hours.
 
 ```{r}
@@ -146,3 +147,35 @@ head(ehd$raw)
 ehd$idlist
 ehd$timeline
 ```
+
+The time of each record is set to January 1st, 1970, prior to the invention of Eco-HAB, to reflect its "dummy" nature. 
+
+## Sample data 3
+
+Now we'll see how ambiguous time on the transition day from daylight saving to standard time, when the clock is rolled back 1 hour in North America, for example. This is an imaginary data set derived from sample data 1.
+
+```{r}
+data_dir <- system.file("extdata", "dataset_b", package = "ecohabr2")
+idfile <- file.path(data_dir, "sample_b_idlist.txt")
+timefile <- file.path(data_dir, "sample_b_timeline.txt")
+files <- list.files(data_dir, pattern = "0000\\.txt$", full.names = TRUE)
+ehd <- EcoHAB$new(files, idfile, timefile, timezone = "America/New_York")
+```
+
+Now we have created an EcoHAB object with ambiguous time stamps. We can check out the raw data in it. Note that these data are designed to be read-only.
+
+```{r}
+ehd$raw
+ehd$idlist
+ehd$timeline
+```
+
+Let's look at the content of raw file.
+
+```{r}
+cat(readLines(files[1], warn = FALSE), sep = '\n')
+```
+
+Note how the roll-back of time stamps are processed.The EcoHAB object will check the ambiguous interval [1:00:00 EDT, 2:00:00 EST) and find a point where the time stamp jumps backwards. In this case the roll-back happens at line 21. All records prior to this will be assigned to EDT, while the rest are EST.
+
+To avoid the ambiguity, one can run the Eco-HAB experiment with a PC set to use UTC time zone, and set timezone = "UTC" when creating new EcoHAB object.

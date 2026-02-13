@@ -1,5 +1,14 @@
 # ecohabr2 2.1.0
 
+## 2.1.1 (2026-02-13)
+* Timezone ambiguity is addressed by guessing the transition point from recordings. Not that it won't be accurate if too few data points are recorded.
+* Add a "local"" seed in the dummy() function to generate reproducible results.
+* Add a reset_results() function to delete current results in an EcoHAB object.
+
+Known issues: 
+* Currently calc_follow() only checks if the follower enters the tube later than the followee. Whether the follower exits the tube later than the followee needs to be addressed.
+* In calc_events(), the initial location in idlist file has not been used to populate the first event (the one before the first RFID reading).
+
 ## 2.1.0 (2026-02-05)
 * Add a dummy() function to generate dummy data for test.
 * Add a vignette to show how to use the package.
