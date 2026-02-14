@@ -253,7 +253,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           t_ambiguous <- time_pre != time_post
                           n_ambiguous <- sum(t_ambiguous)
                           if (n_ambiguous > 1) {
-                            t_delta <- diff(as.numeric(time_pre) +
+                            t_delta <- diff(as.numeric(time_pre[t_ambiguous]) +
                                               raw_data[t_ambiguous, delay] / 1000)
                             n_switch <- which(t_delta < 0)
                             raw_data[t_ambiguous, time := c(time_pre[t_ambiguous][seq_len(n_switch)],
