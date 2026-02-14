@@ -7,7 +7,7 @@
 This class stores raw data and convert them into events and summaries.
 }
 \details{
-Additional details...
+The EcoHAB class is generated from a list of raw data files, a ID file and a time line file, and store them as private members. External access is granted by active bindings to protect the reference nature of R6 class and data.table. Analysis results are stored as private and accessed by functions that return a copy of data.table.
 }
 \section{Active bindings}{
 \if{html}{\out{<div class="r6-active-bindings">}}
