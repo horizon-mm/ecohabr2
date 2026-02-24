@@ -10,7 +10,7 @@
 #' @import data.table
 #' @importFrom lubridate ymd_hms force_tz
 #' @import shiny
-#' @importFrom DT datatable DTOutput renderDT JS dataTableProxy selectRows replaceData
+#' @importFrom DT datatable DTOutput renderDT JS dataTableProxy selectRows replaceData formatRound
 #' @import ggplot2
 #' @export
 EcoHAB <- R6::R6Class("EcoHAB",
@@ -26,7 +26,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         follow_threshold = NULL,
                         n_partial = 0,
                         n_fixed = 0,
-                        key_cols = c("rfid", "time_start", "delay_start"),
+                        key_cols = c("rfid", "start"),
                         config = data.table::data.table(id_reader = 1:8,
                                                         tube = c("ab", "ba", "bc", "cb",
                                                                  "cd", "dc", "da", "ad"),
@@ -80,34 +80,31 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           dup_dt <- sub_dt
                           # add a vitual rfid read to make the event before the mouse is first detected
                           row_first <- data.table(sub_dt[1, "id_reader"],
-                                                  private$.raw[1, "time"] - private$loc_threshold,
-                                                  delay = 0)
+                                                  private$.raw[1, "time"] - private$loc_threshold)
                           # add a virtual rfid read to make the event after the mouse is last detected
                           row_last <- data.table(sub_dt[.N, "id_reader"],
-                                                 private$.raw[.N, "time"] + private$loc_threshold,
-                                                 delay = 0)
+                                                 private$.raw[.N, "time"] + private$loc_threshold)
                           # make the "from" half of the data.table
                           dup_dt <- rbindlist(list(row_first, dup_dt), use.names = TRUE, fill = TRUE)
-                          setnames(dup_dt, c("id_reader", "time", "delay"),
-                                   c("id_reader_start", "time_start", "delay_start"))
+                          setnames(dup_dt, c("id_reader", "time"),
+                                   c("id_reader_start", "start"))
                           # make the "to" half of the data.table
                           sub_dt <- rbindlist(list(sub_dt, row_last), use.names = TRUE, fill = TRUE)
-                          setnames(sub_dt, c("id_reader", "time", "delay"),
-                                   c("id_reader_end", "time_end", "delay_end"))
+                          setnames(sub_dt, c("id_reader", "time"),
+                                   c("id_reader_end", "end"))
                           # build the from-to data table
                           dup_dt[, names(sub_dt) := sub_dt]
-                          dup_dt[, duration_ms := (time_end - time_start)*1000 + delay_end - delay_start]
-                          dup_dt[, location := private$loc(id_reader_start, id_reader_end, duration_ms)]
+                          dup_dt[, duration := as.numeric(difftime(end, start, units = "secs"))]
+                          dup_dt[, location := private$loc(id_reader_start, id_reader_end, duration)]
                           # find duplicated events at the same id reader
                           # make the first event as combined and delete the others 
                           dup_dt[, dup := rleid(id_reader_start, id_reader_end, location)]
                           dup_dt[, ':='(id_reader_end = id_reader_end[.N],
-                                        time_end = time_end[.N],
-                                        delay_end = delay_end[.N],
-                                        duration_ms = sum(duration_ms),
+                                        end = end[.N],
+                                        duration = sum(duration),
                                         location = ifelse(seq_len(.N) == 1, location, NA)),
                                  by = dup]
-                          dup_dt <- dup_dt[!is.na(location) & duration_ms > 0]
+                          dup_dt <- dup_dt[!is.na(location) & duration > 0]
                           dup_dt[, dup := NULL]
                         },
                         
@@ -125,7 +122,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # appear to be in that tube for unexpected long period and may be omitted manually
                           same_id_reader <- from == to
                           res <- character(length(from))
-                          res[same_id_reader] <- ifelse(duration[same_id_reader] >= 1000*private$loc_threshold,
+                          res[same_id_reader] <- ifelse(duration[same_id_reader] >= private$loc_threshold,
                                                         private$config$cage[from[same_id_reader]],
                                                         as.character(from[same_id_reader]))
                           res[!same_id_reader] <- private$locmap[cbind(from[!same_id_reader], to[!same_id_reader])]
@@ -239,10 +236,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                    c("timestamp", "rfid", "id_reader"))
                           raw_data <- unique(raw_data)
                           raw_data[, id_reader := as.integer(id_reader)]
-                          # convert the time stamps into POSIXct time (in second) and millisecond
-                          raw_data[, time := ymd_hms(substr(timestamp, 1, 15))]
+                          # convert the time stamps into POSIXct time
+                          raw_data[, time := ymd_hms(sub("(.{3})$", ".\\1", timestamp))]
                           # ymd_hms converts time stamps "YYYYMMDD_HHMMSS" as UTC by default
-                          raw_data[, delay := as.integer(substr(timestamp, 16, 18))]
                           
                           time_pre <- force_tz(raw_data[, time], tzone = timezone, roll_dst = "pre")
                           time_post <- force_tz(raw_data[, time], tzone = timezone, roll_dst = "post")
@@ -253,15 +249,12 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           t_ambiguous <- time_pre != time_post
                           n_ambiguous <- sum(t_ambiguous)
                           if (n_ambiguous > 1) {
-                            t_delta <- diff(as.numeric(time_pre[t_ambiguous]) +
-                                              raw_data[t_ambiguous, delay] / 1000)
+                            t_delta <- diff(as.numeric(time_pre[t_ambiguous]))
                             n_switch <- which(t_delta < 0)
                             raw_data[t_ambiguous, time := c(time_pre[t_ambiguous][seq_len(n_switch)],
                                                             time_post[t_ambiguous][(n_switch+1) : n_ambiguous])]
                           }
-                          raw_data[, time := as.numeric(time)]
-                          
-                          private$.raw <- raw_data[order(time, delay, rfid)]
+                          private$.raw <- raw_data[order(time, rfid)]
                           
                           # read mouse id file and timeline config file
                           private$.idlist <- fread(idfile, colClasses = "character")
@@ -274,7 +267,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$timezone <- timezone
                           
                           # validate the structure of raw data
-                          check_required_columns(private$.raw, c("rfid", "id_reader", "time", "delay"))
+                          check_required_columns(private$.raw, c("rfid", "id_reader", "time"))
                           check_required_columns(private$.idlist, c("rfid", "mid", "loc"))
                           check_required_columns(private$.timeline, c("phase", "start", "end"))
                         },
@@ -333,12 +326,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           }
                           raw <- rbindlist(raw, use.names = TRUE, fill = TRUE)
                           raw <- raw[order(timestamp, rfid)]
-                          raw[, time := floor(timestamp)]
-                          raw[, delay := as.integer(1000*(timestamp - time))]
-                          raw[, timestamp := as.POSIXct(timestamp, tz = timezone)]
-                          raw[, timestamp := format(timestamp, "%Y%m%d_%H%M%OS3")]
+                          raw[, time := as.POSIXct(timestamp, tz = timezone)]
+                          raw[, timestamp := format(time, "%Y%m%d_%H%M%OS3")]
                           raw[, timestamp := gsub("\\.", "", timestamp)]
-                          setcolorder(raw, c("timestamp", "rfid", "id_reader", "time", "delay"))
+                          setcolorder(raw, c("timestamp", "rfid", "id_reader", "time"))
                           private$.raw <- raw[]
                           
                           # make idlist
@@ -355,7 +346,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           private$timezone <- timezone
                           
                           # validate the structure of raw data
-                          check_required_columns(private$.raw, c("rfid", "id_reader", "time", "delay"))
+                          check_required_columns(private$.raw, c("rfid", "id_reader", "time"))
                           check_required_columns(private$.idlist, c("rfid", "mid", "loc"))
                           check_required_columns(private$.timeline, c("phase", "start", "end"))
                           
@@ -402,7 +393,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # Step 2. Get individual events
                           private$.events <- private$.raw[, private$raw_events(.SD),
                                                           by = rfid,
-                                                          .SDcols = c("id_reader", "time", "delay")]
+                                                          .SDcols = c("id_reader", "time")]
                           setkeyv(private$.events, private$key_cols)
                           private$results[["events"]] <- copy(private$.events)
                           invisible(self)
@@ -456,13 +447,15 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             rv <- reactiveValues(data = events_edit,
                                                  prepared = events_prepared,
                                                  backup = events_original,
+                                                 rtPageLength = 25,
+                                                 rtRow = 0,
                                                  edit_count = 0)
                             # leftTable data: filtered by location, rfid and duration_ms
                             filteredLeft <- reactive({
                               d <- rv$prepared
                               if (nzchar(input$rfid))
                                 d <- d[rfid == input$rfid]
-                              d[duration_ms >= input$duration * 1000]
+                              d[duration >= input$duration]
                             })
                             #rightTable data: filtered by the same rfid as leftTable
                             filteredRight <- reactive({
@@ -475,60 +468,75 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             # showTable data: filtered by the same time as selected row in leftTable
                             filteredShow <- reactive({
                               d <- rv$backup
-                              #time_cols = c("time_start", "time_end")
+                              #time_cols = c("start", "end")
                               select_left <- input$leftTable_rows_selected
                               if (length(select_left) > 0) {
-                                start <- filteredLeft()[select_left, time_start]
-                                end <- filteredLeft()[select_left, time_end]
-                                loc <- filteredLeft()[select_left, location]
-                                d <- d[time_start <= end & time_end >= start]
+                                select_start <- filteredLeft()[select_left, start]
+                                select_end <- filteredLeft()[select_left, end]
+                                select_loc <- filteredLeft()[select_left, location]
+                                d <- d[start <= select_end & end >= select_start]
                                 d <- {
-                                  if (loc == "err")
+                                  if (select_loc == "err")
                                     d[location %in% private$config$tube]
                                   else
-                                    d[location == loc | location == private$loc_rev[loc]]
+                                    d[location == select_loc | location == private$loc_rev[select_loc]]
                                   }
                               }
                               d
                             })
-                            
+                            # create a proxy for rows selection
                             proxy <- dataTableProxy("rightTable")
                             # leftTable output: filtered original data, read-only
                             output$leftTable <- renderDT({
-                              datatable(filteredLeft(), editable = FALSE, selection = "single",
-                                        options = list(dom = 'ltip', ordering = FALSE,
-                                                       scrollX = TRUE, autoWidth = TRUE))
+                              filteredLeft() |>
+                                datatable(editable = FALSE,
+                                          selection = "single",
+                                          options = list(dom = 'ltip',
+                                                         ordering = FALSE,
+                                                         scrollX = TRUE,
+                                                         autoWidth = TRUE)) |>
+                                formatRound("duration", 3)
                             }, server = TRUE)
                             # rightTable output: only editing location is allowed
                             # monitor page length changes
                             # jump to page
                             output$rightTable <- renderDT({
-                              datatable(filteredRight(),
-                                        editable = list(target = "cell",
-                                                        disable = list(columns = 1:8)),
-                                        selection = "single",
-                                        options = list(dom = 'ltip', ordering = FALSE,
-                                                       scrollX = TRUE, autoWidth = TRUE,
-                                                       initComplete = JS(
-                                                         "function(settings, json) {",
-                                                         "  var table = this.api();",
-                                                         "  Shiny.setInputValue('rightTable_dt_ready', true);",
-                                                         "  Shiny.setInputValue('rightTable_pageLength', table.page.len());",
-                                                         "  table.on('length.dt', function(e, settings, len) {",
-                                                         "    Shiny.setInputValue('rightTable_pageLength', len);",
-                                                         "  });",
-                                                         "  Shiny.addCustomMessageHandler('gotoPage', function(page){",
-                                                         "    if(page === null || isNaN(page)) return;",
-                                                         "    table.page(page).draw(false);",
-                                                         "  });",
-                                                         "}"
-                                                       )))
+                              filteredRight() |>
+                                datatable(editable = list(target = "cell",
+                                                          disable = list(columns = 1:6)),
+                                          selection = "single",
+                                          options = list(dom = 'ltip',
+                                                         ordering = FALSE,
+                                                         scrollX = TRUE,
+                                                         autoWidth = TRUE,
+                                                         pageLength = isolate(rv$rtPageLength), 
+                                                         displayStart = isolate(rv$rtRow),
+                                                         initComplete = JS(
+                                                           "function(settings, json) {
+                                                             var table = this.api();
+                                                             Shiny.setInputValue('rightTable_dt_ready', true);
+                                                             Shiny.setInputValue('rightTable_pageLength', table.page.len());
+                                                             table.on('length.dt', function(e, settings, len) {
+                                                               Shiny.setInputValue('rightTable_pageLength', len);
+                                                               });
+                                                             Shiny.addCustomMessageHandler('gotoPage', function(page){
+                                                               if(page === null || isNaN(page)) return;
+                                                               table.page(page).draw(false);
+                                                               });
+                                                             }"
+                                                           ))) |>
+                                formatRound("duration", 3)
                             }, server = TRUE)
                             # showTable output: all concurrent events with selected events in leftTable
                             output$showTable <- renderDT({
-                              datatable(filteredShow(), editable = FALSE, selection = "none",
-                                        options = list(dom = 'ltip', ordering = FALSE,
-                                                       scrollX = TRUE, autoWidth = TRUE))
+                              filteredShow() |>
+                                datatable(editable = FALSE,
+                                          selection = "none",
+                                          options = list(dom = 'ltip',
+                                                         ordering = FALSE,
+                                                         scrollX = TRUE,
+                                                         autoWidth = TRUE)) |>
+                                formatRound("duration", 3)
                             })
                             # monitor single row selection on leftTable and turn rightTable to page of the same raw
                             observeEvent(input$leftTable_rows_selected, {
@@ -578,9 +586,14 @@ EcoHAB <- R6::R6Class("EcoHAB",
                               if (length(edit_row) == 0)
                                 return()
                               # modify the backend data and update rightTable
+                              # no need to coerce info$value
+                              # technically there is only one hit
                               set(rv$data, edit_row, col, v)
+                              rv$rtPageLength <- input$rightTable_pageLength
+                              rv$rtRow <- input$rightTable_rows_current[1] - 1
+                              # force to refresh filteredRight()
+                              # as change of rv$data by set() is not deemed as reactive
                               rv$edit_count <- rv$edit_count + 1
-                              replaceData(proxy, filteredRight(), resetPaging = FALSE)
                             })
                             # save the modifications on rightTable to backend data
                             observeEvent(input$saveBtn,{
@@ -619,12 +632,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                         cages = unique(private$config$cage),
                                         all = unique(private$results[["events"]]$location))
                           
-                          # Step 1. Convert start and end time to milliseconds from the beginning
+                          # Step 1. Get the filtered events data.table
                           events_dt <- copy(private$results[["events"]])
                           events_dt <- events_dt[location %in% loc]
-                          offset <- min(events_dt$time_start)
-                          events_dt[, ':='(start = (time_start - offset)*1000 + delay_start,
-                                           end = (time_end - offset)*1000 + delay_end)]
                           
                           # Step 2. Remove overlaps
                           single_dt <- events_dt[, {
@@ -639,16 +649,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           }, by = location, .SDcols = c("rfid", "start", "end")]
                           
                           # Step 3. Clean up the results data.table
-                          single_dt[, ':='(time_start = offset + start %/% 1000,
-                                           delay_start = start %% 1000,
-                                           time_end = offset + end %/% 1000,
-                                           delay_end = end %% 1000,
-                                           duration_ms = end - start)]
-                          single_dt <- single_dt[duration_ms > 0][order(start, end, rfid)]
-                          single_dt[, c("start", "end") := NULL]
-                          setcolorder(single_dt, c("rfid", "time_start",
-                                                   "delay_start", "time_end", "delay_end",
-                                                   "duration_ms", "location"))
+                          single_dt[, duration := as.numeric(difftime(end, start, units = "secs"))]
+                          single_dt <- single_dt[duration > 0][order(start, end, rfid)]
+                          setcolorder(single_dt, c("rfid", "start", "end", "duration", "location"))
                           private$results[["single"]] <- single_dt
                           invisible(self)
                         },
@@ -666,16 +669,13 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                         cages = unique(private$config$cage),
                                         all = unique(private$results[["events"]]$location))
                           
-                          # Step 1. Convert start and end time to milliseconds from the beginning
+                          # Step 1. Get the filtered events data.table
                           events_dt <- copy(private$results[["events"]])
                           events_dt <- events_dt[location %in% loc]
-                          offset <- min(events_dt$time_start)
-                          events_dt[, ':='(start = (time_start - offset)*1000 + delay_start,
-                                           end = (time_end - offset)*1000 + delay_end)]
                           
                           # Step 2. Calculate overlaps
                           # foverlaps treats intervals as closed at both start and end
-                          # and generates overlaps with 0 duration_ms
+                          # and generates overlaps with 0 duration
                           setkey(events_dt, location, start, end)
                           events_overlap <- foverlaps(events_dt, events_dt,
                                                       by.x = c("location", "start", "end"),
@@ -689,21 +689,14 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                                       end = pmin(end, i.end))]
                           
                           # Step 3. Clean up the results data.table
-                          # remove overlaps with 0 duration_ms
+                          # remove overlaps with 0 duration
                           # sort the data.table by .(start, end)
                           pair_dt <- unique(pair_dt)
                           pair_dt[, ':=' (rfid = paste(rfid1, rfid2, sep = "_"),
-                                          time_start = offset + start %/% 1000,
-                                          delay_start = start %% 1000,
-                                          time_end = offset + end %/% 1000,
-                                          delay_end = end %% 1000,
-                                          duration_ms = end - start)]
-                          pair_dt <- pair_dt[duration_ms > 0][order(start, end, rfid)]
-                          pair_dt[, c("start", "end") := NULL]
-                          setcolorder(pair_dt, c("rfid1", "rfid2", "rfid",
-                                                 "time_start", "delay_start",
-                                                 "time_end", "delay_end",
-                                                 "duration_ms", "location"))
+                                          duration = as.numeric(difftime(end, start, units = "secs")))]
+                          pair_dt <- pair_dt[duration > 0][order(start, end, rfid)]
+                          setcolorder(pair_dt, c("rfid1", "rfid2", "rfid", "start",
+                                                 "end", "duration", "location"))
                           private$results[["pair"]] <- pair_dt
                           invisible(self)
                         },
@@ -740,14 +733,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           followee_dt <- copy(private$results[["events"]])
                           followee_dt <- followee_dt[location %in% loc]
                           follower_dt <- copy(followee_dt)
-                          offset <- min(followee_dt$time_start)
+                          
                           if (mode == "delayed") {
-                            followee_dt[, ':='(time_end = time_start + threshold, delay_end = delay_start)]
+                            followee_dt[, end := start + threshold]
                           }
-                          followee_dt[, ':='(start = (time_start - offset)*1000 + delay_start,
-                                             end = (time_end - offset)*1000 + delay_end)]
-                          follower_dt[, ':='(start = (time_start - offset)*1000 + delay_start,
-                                             end = (time_start - offset)*1000 + delay_start)]
                           
                           # Step 2. Calculate overlaps
                           # foverlaps treats intervals as closed at both start and end
@@ -763,10 +752,6 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                       .(location,
                                                         rfid1 = rfid,
                                                         rfid2 = i.rfid,
-                                                        time_start,
-                                                        delay_start,
-                                                        time_end = i.time_start,
-                                                        delay_end = i.delay_start,
                                                         start,
                                                         end = i.start)]
                           # TODO: check if the followee stays at the reader after passing the tube
@@ -776,12 +761,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # rfid1 (before "|") as the followee; rfid2 (after "|") as the follower
                           # duration_ms is the delay of entries in each followee-follower pair
                           follow_dt[, ':='(rfid = paste(rfid1, rfid2, sep = "|"),
-                                           duration_ms = end - start)]
-                          follow_dt <- follow_dt[duration_ms > 0][order(start, end, rfid)]
-                          follow_dt[, c("start", "end") := NULL]
-                          setcolorder(follow_dt, c("rfid1", "rfid2", "rfid", "time_start",
-                                                   "delay_start", "time_end", "delay_end",
-                                                   "duration_ms", "location"))
+                                           duration = as.numeric(difftime(end, start, units = "secs")))]
+                          follow_dt <- follow_dt[duration > 0][order(start, end, rfid)]
+                          setcolorder(follow_dt, c("rfid1", "rfid2", "rfid", "start",
+                                                   "end", "duration", "location"))
                           private$results[["follow"]] <- follow_dt
                           invisible(self)
                         },
@@ -801,13 +784,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # some "pair" or "follow" id pairs may be missing at a location or phase
                           # phase and rfid are extracted from metadata md
                           # location is extracted from the events data.table
-                          offset <- as.numeric(min(private$.timeline_bin$start))
                           bin_breaks <- c(private$.timeline_bin$start,
                                           private$.timeline_bin$end[nrow(private$.timeline_bin)])
-                          bin_breaks <- (as.numeric(bin_breaks) - offset) *1000
                           bin_labels <- private$.timeline_bin$phase
-                          bin_size <- setNames(private$.timeline_bin$binsize,
-                                               private$.timeline_bin$phase)
+                          bin_size <- setNames(private$.timeline_bin$binsize, bin_labels)
                           bin_size <- as.numeric(bin_size, "secs")
                           all_rfid <- private$.idlist$rfid
                           rfid_pair <- CJ(rfid1 = all_rfid, rfid2 = all_rfid)
@@ -829,8 +809,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # assign each event into one interval defined by timeline_bin and count
                           # depending on where start is
                           visits_dt <- copy(activity_dt)
-                          visits_dt[, idx := findInterval((time_start - offset)*1000 +
-                                                            delay_start, bin_breaks)]
+                          visits_dt[, idx := findInterval(start, bin_breaks)]
                           visits_dt <- visits_dt[idx > 0 & idx < length(bin_breaks)]
                           visits_dt[, phase := bin_labels[idx]]
                           visits_res <- visits_dt[, .N, by = .(phase, rfid, location)]
@@ -844,23 +823,21 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           # depending on where start and end are
                           # if an event [start, end) spans more than one interval split it into multiple ones
                           time_dt <- copy(activity_dt)
-                          time_dt[, ':='(start = (time_start - offset)*1000 + delay_start,
-                                         end = (time_end - offset)*1000 + delay_end)]
                           time_dt[, ':='(idx_start = findInterval(start, bin_breaks),
-                                         idx_end = findInterval(end - 1, bin_breaks))]
+                                         idx_end = findInterval(end, bin_breaks))]
                           time_dt <- time_dt[idx_start <= idx_end, .(idx = idx_start : idx_end),
                                              by = .(rfid, location, start, end)]
                           time_dt <- time_dt[idx > 0 & idx < length(bin_breaks)]
                           time_dt[, ':='(phase = bin_labels[idx],
                                          new_start = pmax(start, bin_breaks[idx]),
                                          new_end = pmin(end, bin_breaks[idx + 1]))]
-                          time_dt[, duration_ms := new_end - new_start]
-                          time_res <- time_dt[, .(duration_ms = sum(duration_ms)),
+                          time_dt[, duration := as.numeric(difftime(new_end, new_start, units = "secs"))]
+                          time_res <- time_dt[, .(duration = sum(duration)),
                                               by = .(phase, rfid, location)]
                           time_res <- merge(all_combo, time_res,
                                             by = c("phase", "rfid", "location"), all.x = TRUE)
-                          time_res[is.na(duration_ms), duration_ms := 0]
-                          time_res[, ratio := duration_ms/bin_size[phase]/1000]
+                          time_res[is.na(duration), duration := 0]
+                          time_res[, ratio := duration/bin_size[phase]]
                           if (name == "pair") {
                             co_dt <- self$get_result("events_time")[location %in%
                                                                       unique(private$results[["pair"]]$location)]
@@ -869,12 +846,12 @@ EcoHAB <- R6::R6Class("EcoHAB",
                               rfid1 = rfid[idx[1,]]
                               rfid2 = rfid[idx[2,]]
                               data.table(rfid = paste0(pmin(rfid1, rfid2), "_", pmax(rfid1, rfid2)),
-                                         co_duration = duration_ms[idx[1,]] * duration_ms[idx[2,]])
+                                         co_duration = duration[idx[1,]] * duration[idx[2,]])
                             }, by = .(phase, location)]
-                            co_dt[, adjust := co_duration/bin_size[phase]**2/1e6]
+                            co_dt[, adjust := co_duration/bin_size[phase]**2]
                             setkey(co_dt, phase, rfid, location)
                             time_res <- time_res[co_dt, on = .(phase, rfid, location),
-                                                 .(phase, rfid, location, duration_ms, ratio = ratio - i.adjust)]
+                                                 .(phase, rfid, location, duration, ratio = ratio - i.adjust)]
                           }
                           private$results[[paste(name, "time", sep = "_")]] <- time_res
                           invisible(self)
