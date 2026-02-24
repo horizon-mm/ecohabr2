@@ -5,12 +5,17 @@ import(R6)
 import(data.table)
 import(ggplot2)
 import(shiny)
-importFrom(DT,DTOutput)
-importFrom(DT,JS)
-importFrom(DT,dataTableProxy)
-importFrom(DT,datatable)
-importFrom(DT,renderDT)
-importFrom(DT,replaceData)
-importFrom(DT,selectRows)
-importFrom(lubridate,force_tz)
-importFrom(lubridate,ymd_hms)
+importFrom(DT,
+  DTOutput,
+  JS,
+  dataTableProxy,
+  datatable,
+  formatRound,
+  renderDT,
+  replaceData,
+  selectRows
+)
+importFrom(lubridate,
+  force_tz,
+  ymd_hms
+)
