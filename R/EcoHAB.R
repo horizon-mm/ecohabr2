@@ -85,6 +85,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                   private$.raw[1, "time"] - private$loc_threshold)
                           # add a virtual rfid read to make the last event after the mouse is detected for the last time
                           # the virtual read is loc_threshold after the last read so that the last event is not deemed at any RFID reader
+                          # add a virtual rfid read to make the event after the mouse is last detected
                           row_last <- data.table(sub_dt[.N, "id_reader"],
                                                  private$.raw[.N, "time"] + private$loc_threshold)
                           # make the "from" half of the data.table
