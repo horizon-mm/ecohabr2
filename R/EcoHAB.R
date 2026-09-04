@@ -85,6 +85,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                   private$.raw[1, "time"] - private$loc_threshold)
                           # add a virtual rfid read to make the last event after the mouse is detected for the last time
                           # the virtual read is loc_threshold after the last read so that the last event is not deemed at any RFID reader
+                          # add a virtual rfid read to make the event after the mouse is last detected
                           row_last <- data.table(sub_dt[.N, "id_reader"],
                                                  private$.raw[.N, "time"] + private$loc_threshold)
                           # make the "from" half of the data.table
@@ -847,9 +848,12 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                             by = c("phase", "rfid", "location"), all.x = TRUE)
                           time_res[is.na(duration), duration := 0]
                           time_res[, ratio := duration/bin_size[phase]]
+<<<<<<< HEAD
                           # adjust for in-cohort sociability
                           # at any location, sociability = rfid1_rfid2 ratio - rfid1 ratio * rfid2 ratio
                           # aka time ratio of two mice in the same location subtracting chance level
+=======
+>>>>>>> d25061426167724b85ab9579e9e4f378142b434f
                           if (name == "pair") {
                             co_dt <- self$get_result("events_time")[location %in%
                                                                       unique(private$results[["pair"]]$location)]
