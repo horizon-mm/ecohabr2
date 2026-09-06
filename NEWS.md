@@ -1,4 +1,11 @@
-# ecohabr2 2.2.0
+# ecohabr2 2.2.1
+
+## 2.2.1 (2026-09-06)
+* Optimize use of reactive values and save/exit functions in shinyApp for `edit_events()`.
+
+Known issues: 
+* Currently `calc_follow()` only checks if the follower enters the tube later than the followee. Whether the follower exits the tube later than the followee needs to be addressed.
+* In `calc_events()`, the initial location in idlist file has not been used to populate the first event (the one before the first RFID reading).
 
 ## 2.2.0 (2026-02-26)
 * Store time as one `POSIXct` (time) instead of one `POSIXct` (time) and one `integer` (delay) in all `data.table` class members.

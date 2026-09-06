@@ -411,6 +411,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                         #' @description
                         #' Show and edit events in a ShinyApp
                         edit_events = function() {
+                          # define data.table in the backend
                           events_original <- copy(private$.events)
                           events_edit <- copy(private$results[["events"]])
                           if (is.null(events_original) || is.null(events_edit)) {
@@ -449,36 +450,31 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                    column(6, h4("Editing..."),
                                                           actionButton("saveBtn","Save"),
                                                           actionButton("resetBtn","Reset"),
-                                                          actionButton("finishBtn","Submit"),
-                                                          actionButton("cancelBtn","Cancel"),
+                                                          actionButton("exitBtn","Exit"),
                                                           DTOutput("rightTable"))))
-                          
+                          # Shiny server: define data source of left/right tables
                           server <- function(input, output, session){
-                            rv <- reactiveValues(data = events_edit,
-                                                 prepared = events_prepared,
-                                                 backup = events_original,
-                                                 rtPageLength = 25,
-                                                 rtRow = 0,
-                                                 edit_count = 0)
-                            # leftTable data: filtered by location, rfid and duration_ms
+                            # define data.table to be showed in the frontend
+                            rv <- reactiveValues(edit_count = 0, reset = FALSE)
+                            # leftTable data: filtered by location, rfid and duration
                             filteredLeft <- reactive({
-                              d <- rv$prepared
+                              d <- events_prepared
                               if (nzchar(input$rfid))
                                 d <- d[rfid == input$rfid]
                               d[duration >= input$duration]
                             })
                             #rightTable data: filtered by the same rfid as leftTable
                             filteredRight <- reactive({
-                              count <- rv$edit_count
-                              d <- rv$data
+                              count <- rv$edit_count # receive a modification notice
+                              reset <- rv$reset
+                              d <- events_edit
                               if (nzchar(input$rfid))
                                 d <- d[rfid == input$rfid]
                               d
                             })
                             # showTable data: filtered by the same time as selected row in leftTable
                             filteredShow <- reactive({
-                              d <- rv$backup
-                              #time_cols = c("start", "end")
+                              d <- events_original
                               select_left <- input$leftTable_rows_selected
                               if (length(select_left) > 0) {
                                 select_start <- filteredLeft()[select_left, start]
@@ -519,8 +515,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                          ordering = FALSE,
                                                          scrollX = TRUE,
                                                          autoWidth = TRUE,
-                                                         pageLength = isolate(rv$rtPageLength), 
-                                                         displayStart = isolate(rv$rtRow),
+                                                         pageLength = 25, 
+                                                         displayStart = 0,
                                                          initComplete = JS(
                                                            "function(settings, json) {
                                                              var table = this.api();
@@ -592,35 +588,27 @@ EcoHAB <- R6::R6Class("EcoHAB",
                               key_cols <- private$key_cols
                               col<-names(filteredRight())[j]
                               key_data <- filteredRight()[i, ..key_cols]
-                              edit_row <- rv$data[key_data, on = key_cols, which = TRUE]
+                              edit_row <- events_edit[key_data, on = key_cols, which = TRUE]
                               if (length(edit_row) == 0)
                                 return()
-                              # modify the backend data and update rightTable
                               # no need to coerce info$value
                               # technically there is only one hit
-                              set(rv$data, edit_row, col, v)
-                              rv$rtPageLength <- input$rightTable_pageLength
-                              rv$rtRow <- input$rightTable_rows_current[1] - 1
-                              # force to refresh filteredRight()
-                              # as change of rv$data by set() is not deemed as reactive
-                              rv$edit_count <- rv$edit_count + 1
+                              set(events_edit, edit_row, col, v)
+                              rv$edit_count <- rv$edit_count + 1 # update rightTable
                             })
                             # save the modifications on rightTable to backend data
                             observeEvent(input$saveBtn,{
-                              events_edit <<- rv$data
+                              events_saved <<- copy(events_edit)
                             })
-                            # reset the backend data (and rightTable) to original
+                            # reset the frontend data to original
                             observeEvent(input$resetBtn,{
-                              rv$data <- copy(rv$backup)
+                              events_edit <<- copy(events_original)
+                              rv$reset <- !rv$reset # update rightTable
+                              rv$edit_count <- 0 # reset edit_count
                             })
-                            # exit and return the modified backend data to the parent environment
-                            observeEvent(input$finishBtn,{
-                              events_saved <<- events_edit
+                            # exit and return the modified backend data
+                            observeEvent(input$exitBtn,{
                               stopApp(events_saved)
-                            })
-                            # exit and do not return the modified backend data
-                            observeEvent(input$cancelBtn,{
-                              stopApp(NULL)
                             })
                           }
                           
