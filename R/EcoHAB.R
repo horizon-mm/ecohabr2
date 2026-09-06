@@ -210,7 +210,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           if (missing(val))
                             copy(private$.timeline_bin)
                           else
-                            warning("Binned timeline is read-only.")
+                            warning("Please use set_binsize() to modify time bins.")
                         }
                       ),
                       public = list(
@@ -919,10 +919,10 @@ EcoHAB <- R6::R6Class("EcoHAB",
                           
                           ggplot(dt, aes(mid, phase)) +
                             geom_raster(aes(fill = ratio)) +
-                            geom_hline(yintercept = y_within, color = "black", linetype = "dashed") +
-                            geom_hline(yintercept = y_between, color = "black") +
+                            geom_hline(yintercept = y_within, color = "black", linetype = "dashed", linewidth = 0.6) +
+                            geom_hline(yintercept = y_between, color = "black", linewidth = 0.6) +
                             xlab("Mouse ID") +
-                            scale_fill_gradient(name = "Time ratio", low = "white", high = "deepskyblue", limits = c(0, 1)) +
+                            scale_fill_gradient(name = "Probability", low = "white", high = "#356FA8", limits = c(0, 1)) +
                             scale_y_discrete(name = "Time bin", limits = rev,
                                              breaks = function(x) x[seq_along(x) %% n_bin == 1],
                                              labels = seq(n_phase, n_bin, -n_bin)) +
