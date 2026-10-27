@@ -15,6 +15,7 @@
 #' @export
 EcoHAB <- R6::R6Class("EcoHAB",
                       private = list(
+                        .version = "2.2.1",
                         .raw = NULL,
                         .idlist = NULL,
                         .timeline = NULL,
@@ -184,6 +185,13 @@ EcoHAB <- R6::R6Class("EcoHAB",
                       ),
                       
                       active = list(
+                        #' @field version Version of current ecohabr2 package (read-only)
+                        version = function(val) {
+                          if (missing(val))
+                            private$.version
+                          else
+                            warning("Version is read-only.")
+                        }
                         #' @field raw Processed raw data in a data.table (read-only)
                         raw = function(val) {
                           if (missing(val))
@@ -454,8 +462,11 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                           DTOutput("rightTable"))))
                           # Shiny server: define data source of left/right tables
                           server <- function(input, output, session){
-                            # define data.table to be showed in the frontend
-                            rv <- reactiveValues(edit_count = 0, reset = FALSE)
+                            # reactive values track rightTable changes
+                            # rtPageLength: current length per page
+                            # rtRow: current rwo in the whole datatable
+                            rv <- reactiveValues(rtPageLength = 25, rtRow = 0,
+                                                 edit_count = 0, reset = FALSE)
                             # leftTable data: filtered by location, rfid and duration
                             filteredLeft <- reactive({
                               d <- events_prepared
@@ -465,8 +476,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             })
                             #rightTable data: filtered by the same rfid as leftTable
                             filteredRight <- reactive({
-                              count <- rv$edit_count # receive a modification notice
-                              reset <- rv$reset
+                              count <- rv$edit_count # update when a cell is edited
+                              reset <- rv$reset # update when "reset" button is pressed
                               d <- events_edit
                               if (nzchar(input$rfid))
                                 d <- d[rfid == input$rfid]
@@ -493,6 +504,7 @@ EcoHAB <- R6::R6Class("EcoHAB",
                             # create a proxy for rows selection
                             proxy <- dataTableProxy("rightTable")
                             # leftTable output: filtered original data, read-only
+                            # update when filteredLeft() is changed
                             output$leftTable <- renderDT({
                               filteredLeft() |>
                                 datatable(editable = FALSE,
@@ -504,8 +516,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                 formatRound("duration", 3)
                             }, server = TRUE)
                             # rightTable output: only editing location is allowed
-                            # monitor page length changes
-                            # jump to page
+                            # monitor page length changes by reading rv$rtPageLength
+                            # jump to page by reading rv$rtRow
+                            # update when filteredRight() is changed
                             output$rightTable <- renderDT({
                               filteredRight() |>
                                 datatable(editable = list(target = "cell",
@@ -515,8 +528,8 @@ EcoHAB <- R6::R6Class("EcoHAB",
                                                          ordering = FALSE,
                                                          scrollX = TRUE,
                                                          autoWidth = TRUE,
-                                                         pageLength = 25, 
-                                                         displayStart = 0,
+                                                         pageLength = isolate(rv$rtPageLength), 
+                                                         displayStart = isolate(rv$rtRow),
                                                          initComplete = JS(
                                                            "function(settings, json) {
                                                              var table = this.api();
@@ -594,7 +607,9 @@ EcoHAB <- R6::R6Class("EcoHAB",
                               # no need to coerce info$value
                               # technically there is only one hit
                               set(events_edit, edit_row, col, v)
-                              rv$edit_count <- rv$edit_count + 1 # update rightTable
+                              rv$rtPageLength <- input$rightTable_pageLength
+                              rv$rtRow <- input$rightTable_rows_current[1] - 1 # current row for the updated rightTable
+                              rv$edit_count <- rv$edit_count + 1 # send notice to update rightTable
                             })
                             # save the modifications on rightTable to backend data
                             observeEvent(input$saveBtn,{

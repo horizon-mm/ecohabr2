@@ -1,7 +1,9 @@
 # ecohabr2 2.2.1
 
-## 2.2.1 (2026-09-06)
+## 2.2.1 (2026-10-27)
 * Optimize use of reactive values and save/exit functions in shinyApp for `edit_events()`.
+* Add a `migrate_data()` function to copy data from a previous version of EcoHAB object.
+* Add the version info as a member of the EcoHAB class.
 
 Known issues: 
 * Currently `calc_follow()` only checks if the follower enters the tube later than the followee. Whether the follower exits the tube later than the followee needs to be addressed.
