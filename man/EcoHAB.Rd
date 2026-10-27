@@ -12,6 +12,8 @@ The EcoHAB class is generated from a list of raw data files, a ID file and a tim
 \section{Active bindings}{
   \if{html}{\out{<div class="r6-active-bindings">}}
   \describe{
+    \item{\code{version}}{Version of current ecohabr2 package (read-only)}
+
     \item{\code{raw}}{Processed raw data in a data.table (read-only)}
 
     \item{\code{idlist}}{Animal ID information in a data.table (read-only)}
